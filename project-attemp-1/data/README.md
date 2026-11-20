@@ -15,3 +15,13 @@ ML scripts against your own store, set:
 export SMA_DATA_DIR=/path/to/store/bars
 python ml_model.py
 ```
+
+The strategy engine (`strategy/`) expects the store root instead —
+`<dir>/bars/*.json` plus `<dir>/vnindex.json` (same bar format),
+`<dir>/sector_map.json` ({ticker: sector}) and `<dir>/exchange_map.json`
+({ticker: HOSE|HNX|UPCoM}):
+
+```bash
+export SMA_MARKET_DIR=/path/to/store
+python strategy/strategy_v12.py stop
+```

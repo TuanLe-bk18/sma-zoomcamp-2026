@@ -27,7 +27,10 @@ import os
 STORE = Path(os.environ.get("SMA_DATA_DIR", Path(__file__).resolve().parent / "data" / "bars"))
 
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import accuracy_score, f1_score, roc_auc_score
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import accuracy_score, f1_score, precision_score, roc_auc_score
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
 from sklearn.tree import DecisionTreeClassifier
 
 OUT_DIR = Path(__file__).resolve().parent / "results"
@@ -138,6 +141,9 @@ def main():
         results.append(evaluate(f"DecisionTree depth={depth}",
                                 DecisionTreeClassifier(max_depth=depth, random_state=0),
                                 Xtr, ytr, Xte, yte))
+    lr = Pipeline([("sc", StandardScaler()),
+                   ("clf", LogisticRegression(max_iter=1000))])
+    results.append(evaluate("LogisticRegression", lr, Xtr, ytr, Xte, yte))
     rf = RandomForestClassifier(n_estimators=200, min_samples_leaf=5,
                                 n_jobs=-1, random_state=0)
     results.append(evaluate("RandomForest n=200", rf, Xtr, ytr, Xte, yte))
@@ -146,11 +152,53 @@ def main():
     for k, v in imp.items():
         print(f"  {k:14s} {v:.3f}")
 
+    # ---- Tuning nho: chon cau hinh RF tren validation 2020-2021
+    # (train tren <=2019), sau do refit tren toan bo train <=2021.
+    print("\nTuning RandomForest (validation 2020-2021, train <=2019):")
+    tr_sub = tr[tr["date"] <= "2019-12-31"]
+    val = tr[(tr["date"] > "2019-12-31")]
+    tuning = []
+    for n_est in (100, 200):
+        for depth in (None, 10, 20):
+            m = RandomForestClassifier(n_estimators=n_est, max_depth=depth,
+                                       min_samples_leaf=5, n_jobs=-1,
+                                       random_state=0)
+            m.fit(tr_sub[FEATS], tr_sub["y"])
+            pv = m.predict_proba(val[FEATS])[:, 1]
+            auc_v = roc_auc_score(val["y"], pv)
+            tuning.append({"n_estimators": n_est, "max_depth": depth,
+                           "val_auc": round(float(auc_v), 4)})
+            print(f"  n={n_est} depth={depth}: val AUC={auc_v:.3f}")
+    best = max(tuning, key=lambda r: r["val_auc"])
+    print(f"  -> chon n={best['n_estimators']} depth={best['max_depth']} "
+          f"(val AUC={best['val_auc']:.3f}), refit tren train <=2021:")
+    rf_tuned = RandomForestClassifier(
+        n_estimators=best["n_estimators"], max_depth=best["max_depth"],
+        min_samples_leaf=5, n_jobs=-1, random_state=0)
+    results.append(evaluate(
+        f"RandomForest tuned (n={best['n_estimators']}, "
+        f"depth={best['max_depth']})", rf_tuned, Xtr, ytr, Xte, yte))
+
+    # ---- Rule nguong xac suat tren RF goc: chi "mua" khi proba > nguong.
+    proba_te = rf.predict_proba(Xte)[:, 1]
+    thr_rows = []
+    for thr in (0.55, 0.60):
+        sel = proba_te > thr
+        prec = precision_score(yte, sel, zero_division=0)
+        recall = float((sel & (yte == 1)).sum() / max((yte == 1).sum(), 1))
+        thr_rows.append({"thr": thr, "n_sel": int(sel.sum()),
+                         "precision": round(float(prec), 4),
+                         "recall": round(recall, 4)})
+        print(f"Rule proba>{thr}: chon {int(sel.sum()):,} dong, "
+              f"precision={prec:.3f}, bat duoc {recall:.1%} lenh tang")
+
     # Ghi bao cao
     lines = [
         "# SMA Project — prototype ML (muc 4 rubric)",
         "",
-        "Chay thu ngay 2026-11-14 (venv Midterm, sklearn 1.9.1). "
+        "Chay thu ngay 2026-11-14, cap nhat 2026-11-20 (them "
+        "LogisticRegression, tuning RandomForest tren validation 2020-2021, "
+        "rule nguong xac suat). "
         "Muc dich: lap khoang trong duy nhat cua SMA Project theo rubric — "
         "train model ML kieu bai giang tren du lieu VN de du bao loi nhuan tuong lai.",
         "",
@@ -176,6 +224,31 @@ def main():
         lines.append(f"| {r['model']} | {r['acc']:.3f} | {r['auc']:.3f} | {r['f1']:.3f} |")
     lines += [
         "",
+        "## Tuning RandomForest (validation 2020-2021, train <=2019)",
+        "",
+        "| n_estimators | max_depth | Val AUC |",
+        "|---:|---:|---:|",
+    ]
+    for t in tuning:
+        lines.append(f"| {t['n_estimators']} | {t['max_depth']} | "
+                     f"{t['val_auc']:.3f} |")
+    lines += [
+        "",
+        f"Cau hinh duoc chon (val AUC cao nhat): n_estimators="
+        f"{best['n_estimators']}, max_depth={best['max_depth']} — refit tren "
+        "toan bo train <=2021, ket qua test o bang tren.",
+        "",
+        "## Rule nguong xac suat (RandomForest n=200, test >=2022)",
+        "",
+        "| Nguong proba | So dong duoc chon | Precision (ti le tang that) "
+        "| Ti le bat duoc lenh tang |",
+        "|---:|---:|---:|---:|",
+    ]
+    for t in thr_rows:
+        lines.append(f"| > {t['thr']} | {t['n_sel']:,} | "
+                     f"{t['precision']:.3f} | {t['recall']:.1%} |")
+    lines += [
+        "",
         "## Feature importance (RandomForest)",
         "",
     ]
@@ -184,12 +257,13 @@ def main():
     lines += [
         "",
         "## Doc ket qua (noi thang)",
-        "- Day la prototype chua tune ky: dung de lap muc 4 rubric, chua phai tin hieu giao dich.",
+        "- Da tune (validation 2020-2021) va da thu rule nguong xac suat: "
+        "AUC test van quanh 0,5x — ket luan am dung vung, khong phai do chua tune.",
         "- Neu accuracy/AUC chi ngang doan mu thi ket luan thang nhu vay trong bao cao — "
         "giong cach Kronos da bi bac bang so lieu, khong to hong.",
-        "- Buoc tiep theo neu anh giu de tai v1.2: tune nhe (validation 2020-2021), "
-        "them regime EQW/SMA40w lam feature, roi ghep du bao vao backtest v1.2 "
-        "de do xem model co cai thien gi so voi rule-based khong.",
+        "- Bien the them regime EQW/SMA40w lam feature nam o `ml_model_regime.py` "
+        "(ket qua con te hon). Mo phong giao dich tren xac suat cua model nay "
+        "nam o `trading_simulation.py` — cung khong danh bai benchmark.",
         "",
         "Script: `ml_model.py` (chay lai duoc, seed co dinh).",
     ]

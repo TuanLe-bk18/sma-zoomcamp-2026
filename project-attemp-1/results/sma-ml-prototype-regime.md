@@ -54,4 +54,4 @@ So voi ban goc khong regime: RandomForest AUC 0,516 / acc 0,507; DecisionTree AU
   van dung rule v1.2, khong xay tren du bao cua model. Khong can thu them
   bien the regime nao nua cho muc nay.
 
-Script: `hidden_files/sma_ml_prototype_regime.py` (chay lai duoc, seed co dinh).
+Script: `ml_model_regime.py` (chay lai duoc, seed co dinh).

@@ -194,7 +194,7 @@ def main():
         "- Ghi thang vao bao cao SMA nhu ket qua am hop le cho muc 4 rubric; chien luoc "
         "giao dich van dung rule v1.2, khong xay tren du bao cua model.",
         "",
-        "Script: `hidden_files/sma_ml_prototype_regime.py` (chay lai duoc, seed co dinh).",
+        "Script: `ml_model_regime.py` (chay lai duoc, seed co dinh).",
     ]
     OUT.write_text("\n".join(lines) + "\n", encoding="utf-8")
     print("\nDa ghi:", OUT)
